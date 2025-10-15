@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# optional: show GPU info quickly
+# show GPU (if available)
 nvidia-smi || true
 
 COMFY_DIR="${COMFY_DIR:-/workspace/ComfyUI}"
@@ -12,23 +12,30 @@ PORT="${PORT:-8188}"
 
 mkdir -p "$MODELS_DIR"
 
-# Pull models only if a token is present (provided as a Template Secret on RunPod)
+# Pull model packs from your HF dataset using the token injected as a Template Secret
 if [ -n "${HUGGINGFACE_HUB_TOKEN:-}" ]; then
-  echo "Pulling model packs from https://huggingface.co/datasets/$REPO ..."
-  for sub in $FOLDERS; do
-    echo "[DL] $sub → $MODELS_DIR/$sub"
-    huggingface-cli download "$REPO" \
-      --repo-type dataset \
-      --include "models/$sub/**" \
-      --local-dir "$MODELS_DIR" \
-      --local-dir-use-symlinks False \
-      --token "$HUGGINGFACE_HUB_TOKEN" || true
-  done
+  python - <<'PY'
+import os
+from huggingface_hub import snapshot_download
+repo   = os.environ.get("REPO")
+token  = os.environ.get("HUGGINGFACE_HUB_TOKEN")
+folds  = os.environ.get("FOLDERS","").split()
+local  = os.environ.get("MODELS_DIR")
+for sub in folds:
+    print(f"[DL] models/{sub}/** -> {local}")
+    snapshot_download(
+        repo_id=repo, repo_type="dataset",
+        allow_patterns=[f"models/{sub}/**"],
+        local_dir=local, local_dir_use_symlinks=False,
+        token=token, tqdm_class=None
+    )
+print("HF pulls complete.")
+PY
 else
   echo "HUGGINGFACE_HUB_TOKEN not set — skipping model download."
 fi
 
-# Pick a free port (8188 else 8190)
+# pick a free port (8188 -> 8190 fallback)
 if ss -ltn "sport = :$PORT" >/dev/null 2>&1; then PORT=8190; fi
 
 echo "Starting ComfyUI on 0.0.0.0:$PORT"
