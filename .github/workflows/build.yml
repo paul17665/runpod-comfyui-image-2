@@ -1,4 +1,5 @@
 name: build-and-push-ghcr
+
 on:
   push:
     branches: ["main"]
@@ -13,16 +14,35 @@ jobs:
     permissions:
       contents: read
       packages: write
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      # 🔓 Free 30–50 GB on GitHub-hosted runners (Android, .NET, Haskell, toolcache, old images)
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@v11
+        with:
+          root-reserve-mb: 1024
+          remove-android: true
+          remove-dotnet: true
+          remove-haskell: true
+          remove-codeql: true
+          remove-docker-images: true
+          overprovision-lvm: true
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Buildx (no QEMU since we only build amd64 → saves time/space)
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Login to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 🚀 Build & push. pull:true grabs freshest base; gha cache speeds rebuilds but doesn't bloat runner.
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -33,3 +53,12 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           pull: true
+          provenance: false
+
+      # 🧹 Best-effort cleanup (keeps the runner from choking on logs next step)
+      - name: Cleanup
+        if: always()
+        run: |
+          docker system df || true
+          docker image prune -af || true
+          docker builder prune -af || true
