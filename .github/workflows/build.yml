@@ -16,9 +16,9 @@ jobs:
       packages: write
 
     steps:
-      # 🔓 Free 30–50 GB on GitHub-hosted runners (Android, .NET, Haskell, toolcache, old images)
+      # Free a ton of space (uses the latest tagged release v10)
       - name: Maximize build space
-        uses: easimon/maximize-build-space@v11
+        uses: easimon/maximize-build-space@v10
         with:
           root-reserve-mb: 1024
           remove-android: true
@@ -28,10 +28,24 @@ jobs:
           remove-docker-images: true
           overprovision-lvm: true
 
+      # Extra safety: manual cleanup even if the step above already ran
+      - name: Manual free space (fallback)
+        if: always()
+        run: |
+          df -h
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /usr/local/share/boost || true
+          sudo rm -rf /opt/hostedtoolcache || true
+          sudo docker image prune -af || true
+          sudo docker builder prune -af || true
+          sudo apt-get clean || true
+          df -h
+
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Buildx (no QEMU since we only build amd64 → saves time/space)
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -42,7 +56,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 🚀 Build & push. pull:true grabs freshest base; gha cache speeds rebuilds but doesn't bloat runner.
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -55,7 +68,6 @@ jobs:
           pull: true
           provenance: false
 
-      # 🧹 Best-effort cleanup (keeps the runner from choking on logs next step)
       - name: Cleanup
         if: always()
         run: |
